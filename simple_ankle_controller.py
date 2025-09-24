@@ -14,33 +14,29 @@ class SimpleAnkleController:
         self.com = data.subtree_com[0]
         self.prev_com = self.com.copy()
 
-        self.l_pitch = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "l_foot_pitch")
-        self.r_pitch = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "r_foot_pitch")
+        self.l_pitch_act = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "l_foot_pitch")
+        self.r_pitch_act = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "r_foot_pitch")
+        self.l_pitch_body = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_foot_pitch")
 
         self.com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
         self.desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
         self.pz_req_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "pz_req_marker")
         self.pz_curr_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "pz_curr_marker")
 
-    def body_pos_xy(self, body_name):
-        bid = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, body_name)
-        pos = self.data.xpos[bid]
-        return np.array([pos[0], pos[1]])
-
     def calculate_ankle_torque(self, pz_req, body_name):
-        return 0.5 * self.m * self.g * (pz_req - self.body_pos_xy(body_name)[0])
+        return 0.5 * self.m * self.g * (pz_req - self.data.xpos[self.l_pitch_body][0])
 
     def apply_ankle_torque(self, pz_req):
         torque = self.calculate_ankle_torque(pz_req, "l_foot_pitch")
-        self.data.ctrl[self.l_pitch] = torque
-        self.data.ctrl[self.r_pitch] = torque
+        self.data.ctrl[self.l_pitch_act] = torque
+        self.data.ctrl[self.r_pitch_act] = torque
 
     def show_debug_markers(self, desired_com):
         com = self.com
         self.data.site_xpos[self.com_marker] = np.array([com[0], com[1], com[2]])
         self.data.site_xpos[self.desired_com_marker] = np.array([desired_com, com[1], com[2]])
         self.data.site_xpos[self.pz_req_marker] = np.array([self.pz_req, com[1], 0])
-        self.data.site_xpos[self.pz_curr_marker] = np.array([self.body_pos_xy("l_foot_pitch")[0], com[1], 0])
+        self.data.site_xpos[self.pz_curr_marker] = np.array([self.data.xpos[self.l_pitch_body][0], com[1], 0])
 
     def step(self, desired_com):
         com_vel = (self.com - self.prev_com) / self.dt
