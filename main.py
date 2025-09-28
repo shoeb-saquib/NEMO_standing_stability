@@ -8,19 +8,24 @@ def get_pos(model, qpos, name):
     joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
     return qpos[model.jnt_qposadr[joint_id]]
 
+def get_vel(model, data, name):
+    joint_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, name)
+    return data.qvel[model.jnt_dofadr[joint_id]]
+
 def move_actuator_to_pos(model, data, name, pos):
     curr_pos = get_pos(model, data.qpos, name)
+    vel = get_vel(model, data, name)
     motor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, name)
-    torque = 100 * (pos - curr_pos)
+    torque = 100 * (pos - curr_pos) - 10 * vel
     data.ctrl[motor_id] = torque
 
 def move_all_to_pos(model, data, names, qpos):
     for name in names:
         move_actuator_to_pos(model, data, name, get_pos(model, qpos, name))
 
-def site_pos_xy(model, data, body_name):
-    sid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, body_name)
-    pos = data.xpos[sid]
+def body_pos_xy(model, data, body_name):
+    bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, body_name)
+    pos = data.xpos[bid]
     return np.array([pos[0], pos[1]])
 
 def add_random_vels(t, dt, model, data, noise_std, interval):
@@ -39,10 +44,13 @@ def simulate():
     data.qpos = model.keyframe('home').qpos
     stabilizer = SimpleAnkleController(model, data)
     while True:
-        #add_random_vels(t, dt, model, data, 0.1, 5)
+        add_random_vels(t, dt, model, data, 0.1, 5)
+        l_foot_center = body_pos_xy(model, data, "l_foot_pitch")
+        r_foot_center = body_pos_xy(model, data, "r_foot_pitch")
+        robot_center = [l_foot_center[0], (r_foot_center[1] + l_foot_center[1]) / 2]
         move_all_to_pos(model, data, actuator_names, model.keyframe('home').qpos)
-        desired_com = site_pos_xy(model, data, "l_foot")[0] + 0.16
-        stabilizer.step(desired_com)
+        desired_com = np.array([robot_center[0] + 0.18, robot_center[1], 0])
+        stabilizer.step(desired_com, robot_center)
         mj.mj_step(model, data)
         stabilizer.show_debug_markers(desired_com)
         t += dt
