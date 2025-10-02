@@ -1,5 +1,6 @@
 import mujoco as mj
 import numpy as np
+from mujoco_utils import MujocoUtils
 
 
 class SimpleAnkleController:
@@ -7,7 +8,8 @@ class SimpleAnkleController:
     def __init__(self, model, data):
         self.model = model
         self.data = data
-        self.torque_multiplier = 1
+        self.kp = 2
+        self.kd = 2
 
         self.dt = model.opt.timestep
         self.m = np.sum(model.body_mass)
@@ -17,6 +19,8 @@ class SimpleAnkleController:
         self.robot_center = [0, 0, 0]
         self.pz_req = [0, 0]
 
+        self.l_pitch_joint = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "l_foot_pitch")
+        self.r_pitch_joint = mj.mj_name2id(model, mj.mjtObj.mjOBJ_JOINT, "r_foot_pitch")
         self.l_pitch_act = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "l_foot_pitch")
         self.r_pitch_act = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, "r_foot_pitch")
         self.l_pitch_body = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_foot_pitch")
@@ -30,14 +34,14 @@ class SimpleAnkleController:
         self.pz_curr_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "pz_curr_marker")
 
     def apply_pitch_torque(self, pz_req):
-        torque = self.torque_multiplier * self.m * self.g * (pz_req - self.data.xpos[self.l_pitch_body][0])
-        self.data.ctrl[self.l_pitch_act] = torque
-        self.data.ctrl[self.r_pitch_act] = torque
+        torque = 0.5 * self.m * self.g * (pz_req - self.data.xpos[self.l_pitch_body][0])
+        self.data.ctrl[self.l_pitch_act] = self.kp * torque - self.kd * self.data.qvel[self.l_pitch_joint]
+        self.data.ctrl[self.r_pitch_act] = self.kp * torque - self.kd * self.data.qvel[self.r_pitch_joint]
 
     def apply_roll_torque(self, pz_req):
-        torque = -self.torque_multiplier * self.m * self.g * (pz_req - self.robot_center[1])
-        self.data.ctrl[self.l_roll_act] = torque
-        self.data.ctrl[self.r_roll_act] = torque
+        torque = -0.5 * self.m * self.g * (pz_req - self.robot_center[1])
+        self.data.ctrl[self.l_roll_act] = self.kp * torque
+        self.data.ctrl[self.r_roll_act] = self.kp * torque
 
     def show_debug_markers(self, desired_com):
         com = self.com
