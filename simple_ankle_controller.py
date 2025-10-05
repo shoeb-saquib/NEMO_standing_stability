@@ -9,7 +9,7 @@ class SimpleAnkleController:
         self.model = model
         self.data = data
         self.kp = 2
-        self.kd = 2
+        self.kd = 1
 
         self.dt = model.opt.timestep
         self.m = np.sum(model.body_mass)

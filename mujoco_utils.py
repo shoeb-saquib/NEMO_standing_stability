@@ -17,7 +17,7 @@ class MujocoUtils:
         return start + (t / t_total) * (end - start)
 
     @staticmethod
-    def move_actuator_to_pos(model, data, name, pos, kp = 110, kd = 6):
+    def move_actuator_to_pos(model, data, name, pos, kp = 110, kd = 5):
         curr_pos = MujocoUtils.get_pos(model, data.qpos, name)
         vel = MujocoUtils.get_vel(model, data, name)
         motor_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_ACTUATOR, name)
@@ -27,8 +27,7 @@ class MujocoUtils:
     @staticmethod
     def move_all_to_pos(model, data, names, qpos):
         for name in names:
-            MujocoUtils.move_actuator_to_pos(model, data, name,
-                                             MujocoUtils.get_pos(model, qpos, name))
+            MujocoUtils.move_actuator_to_pos(model, data, name, MujocoUtils.get_pos(model, qpos, name))
 
     @staticmethod
     def body_pos_xy(model, data, body_name):
