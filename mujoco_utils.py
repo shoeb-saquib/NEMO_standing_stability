@@ -30,14 +30,13 @@ class MujocoUtils:
             MujocoUtils.move_actuator_to_pos(model, data, name, MujocoUtils.get_pos(model, qpos, name))
 
     @staticmethod
-    def body_pos_xy(model, data, body_name):
+    def body_pos(model, data, body_name):
         bid = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, body_name)
-        pos = data.xpos[bid]
-        return np.array([pos[0], pos[1]])
+        return data.xpos[bid]
 
     @staticmethod
-    def add_random_vels(t, dt, model, data, noise_std, interval):
+    def add_random_vels(t, dt, data, noise_std, interval):
         cycles = interval // dt
         if int(t // dt) % cycles == 0:
-            print(f"{t:.3f} : ADDED NOISE")
+            #print(f"{t:.3f} : ADDED NOISE")
             data.qvel += np.random.normal(0, noise_std, size=data.qvel.shape)
