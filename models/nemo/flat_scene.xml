@@ -1,5 +1,5 @@
 <mujoco model="flat scene">
-  <include file="nemo5.xml"/>
+  <include file="nemo5_torque.xml"/>
 
   <statistic center="1 -0.8 1.1" extent=".3"/>
 
@@ -14,6 +14,8 @@
   </asset>
 
   <worldbody>
+    <site name="com_marker" pos="0 0 0" size="0.02" type="sphere" rgba="1 0 0 1"/>
+    <site name="desired_com_marker" pos="0 0 0" size="0.02" type="sphere" rgba="0 0 1 1"/>
     <geom name="floor" pos="0 0 0.05" size="0 0 0.01" type="plane" contype="1" conaffinity="2" condim="3" friction=".6"/>
   </worldbody>
 </mujoco>
