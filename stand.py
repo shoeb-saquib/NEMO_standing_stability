@@ -23,19 +23,19 @@ def simulate():
     true_stabilizer = OmniscientStabilizer(model, data)
     dt = model.opt.timestep
     t = 0
-    # data.qpos = 0.0
-    # data.qpos[2] = 0.68
+    data.qpos = 0.0
+    data.qpos[2] = 0.68
+    # data.qpos = model.keyframe('home').qpos
     com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
     desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
     differences = []
     x = []
-    data.qpos = model.keyframe('home').qpos
     mj.mj_step(model, data)
-    while t < 3:
+    while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
         data.ctrl[:], true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
         data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, data.qvel[3:6])
-        differences.append(list(np.array(measured_values) - np.array(true_values)))
+        # differences.append(list(np.array(measured_values) - np.array(true_values)))
         x.append(t)
         mj.mj_step(model, data)
         # data.site_xpos[com_marker] = true
@@ -43,15 +43,15 @@ def simulate():
         t += dt
         time.sleep(dt)
         viewer2.sync()
-    dataframe = pd.DataFrame(differences, columns=parameters)
-    dataframe['Time'] = x
-    for parameter in parameters:
-        display_plot(dataframe, 'Time', parameter)
+    # dataframe = pd.DataFrame(differences, columns=parameters)
+    # dataframe['Time'] = x
+    # for parameter in parameters:
+    #     display_plot(dataframe, 'Time', parameter)
 
 
 if __name__ == "__main__":
     add_noise = False
-    noise_std = 0.1
+    noise_std = 0.15
     noise_frequency = 2
 
     home_com = [-4.36481990e-02, -5.25951358e-06, 3.99707890e-01]

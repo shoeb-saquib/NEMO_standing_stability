@@ -27,19 +27,13 @@ def quat_mul(q1, q2):
         w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
     ])
 
-def rotation_vector_from_quat_error(q_des, q_cur, eps=1e-8):
-    qerr = quat_mul(q_des, quat_conjugate(q_cur))
-    qerr = qerr / np.linalg.norm(qerr)
-
-    w = np.clip(qerr[0], -1.0, 1.0)
-    angle = 2.0 * np.arccos(w)
-    s = np.sqrt(max(0.0, 1.0 - w * w))
-
-    if s < eps or angle < eps:
-        return 2.0 * qerr[1:]
-    else:
-        axis = qerr[1:] / s
-        return axis * angle
+def skew(v):
+    x, y, z = v
+    return np.array([
+        [0, -z,  y],
+        [z,  0, -x],
+        [-y, x,  0]
+    ])
 
 class OmniscientStabilizer:
 
@@ -47,7 +41,8 @@ class OmniscientStabilizer:
         self.model = model
         self.data = data
         self.m = np.sum(model.body_mass)
-        self.fg = self.m * np.array([0, 0, -9.81])
+        self.g = np.array([0, 0, -9.81, 0, 0, 0]).reshape((6, 1))
+        self.a_top = np.hstack((np.eye(3) / self.m, np.zeros((3, 3))))
         self.com = data.subtree_com[0]
         self.prev_com = self.com.copy()
         self.pelvis_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
@@ -62,7 +57,7 @@ class OmniscientStabilizer:
         mj.mj_jacSite(self.model, self.data, jp, jr, site)
         return np.vstack((jp, jr))
 
-    def compute_I_com(self):
+    def compute_inertia_matrix(self):
         sum_m_d2 = 0.0
         for i in range(self.model.nbody):
             mi = self.model.body_mass[i]
@@ -73,9 +68,20 @@ class OmniscientStabilizer:
         if self.m <= 0:
             return np.eye(3) * 1e-6
 
-        I_axis = (2.0 / 3.0) * sum_m_d2
-        I_com = np.eye(3) * I_axis
-        return I_com
+        i_axis = (2.0 / 3.0) * sum_m_d2
+        i_com = np.eye(3) * i_axis
+        return i_com
+
+    def construct_coefficient_matrix(self, inertia_matrix, left=True):
+        if left: foot_site = self.left_site
+        else: foot_site = self.right_site
+        x = self.com - self.data.site_xpos[foot_site]
+        skew_x = skew(x)
+        inv_i = np.linalg.inv(inertia_matrix)
+        a = np.vstack((self.a_top, np.hstack((inv_i @ skew_x, inv_i))))
+        if left: a = np.hstack((a, np.zeros((6, 6))))
+        else: a = np.hstack((np.zeros((6, 6)), a))
+        return a
 
     def calculate_robot_center(self):
         l_foot_center = self.data.site_xpos[self.left_site]
@@ -90,16 +96,17 @@ class OmniscientStabilizer:
         com_vel = (self.com - self.prev_com) / dt
         self.prev_com = self.com.copy()
         desired_accel = 10 * (desired_com - self.com) - 4 * com_vel
-        desired_accel = np.clip(desired_accel, -5, 5)
         q = quat_conjugate(self.data.xquat[self.pelvis_id])
 
         # scipy needs quaternion in the form [x, y, z, w]
         rotvec = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_rotvec()
         desired_angular_accel = 100 * rotvec - 10 * self.data.qvel[3:6]
-        f = (self.m * desired_accel - self.fg) / 2
-        t = (self.compute_I_com() @ desired_angular_accel) / 2
-        wrench = np.concatenate((f, t))
-        torques = -(jl.T @ wrench + jr.T @ wrench)
+
+        i = self.compute_inertia_matrix()
+        a = self.construct_coefficient_matrix(i, True) + self.construct_coefficient_matrix(i, False)
+        b = np.hstack((desired_accel, desired_angular_accel)).reshape((6, 1)) - self.g
+        f = np.linalg.pinv(a) @ b
+        torques = -(jl.T @ f[:6, 0] + jr.T @ f[6:, 0])
         values = [np.linalg.norm(self.com), np.linalg.norm(desired_com - self.com), np.linalg.norm(com_vel), np.linalg.norm(desired_accel),
                   np.linalg.norm(rotvec), np.linalg.norm(desired_angular_accel)]
         return torques[6:], values
