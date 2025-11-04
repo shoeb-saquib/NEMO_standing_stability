@@ -26,17 +26,17 @@ def simulate():
     data.qpos = 0.0
     data.qpos[2] = 0.68
     # data.qpos = model.keyframe('home').qpos
+    mj.mj_step(model, data)
     com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
     desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
     differences = []
     x = []
-    mj.mj_step(model, data)
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
-        data.ctrl[:], true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
-        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, data.qvel[3:6])
+        data.ctrl[:], com_vel, true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
+        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel)
         # differences.append(list(np.array(measured_values) - np.array(true_values)))
-        x.append(t)
+        # x.append(t)
         mj.mj_step(model, data)
         # data.site_xpos[com_marker] = true
         # data.site_xpos[desired_com_marker] = measured

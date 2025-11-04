@@ -51,8 +51,7 @@ class Stabilizer:
         self.g = np.array([0, 0, -9.81, 0, 0, 0]).reshape((6, 1))
         self.a_top = np.hstack((np.eye(3) / self.m, np.zeros((3, 3))))
         self.com = data.subtree_com[0]
-        self.prev_com = self.com.copy()
-        self.prev_frame = None
+        self.prev_com = None
         self.pelvis_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "pelvis")
         self.left_foot_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_foot_roll")
         self.left_site = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "left_foot")
@@ -124,26 +123,26 @@ class Stabilizer:
         else:
             return left_frame
 
-    def calculate_joint_torques(self, dt, positions, desired_offset, omega):
+    def calculate_joint_torques(self, dt, positions, desired_offset, true_com_vel):
         self.data.qpos[:7] = [0] * 7
         self.data.qpos[7:] = positions
         mj.mj_step(self.model, self.data)
         robot_center = self.calculate_robot_center()
         frame = self.estimate_floor_frame_from_feet(robot_center)
-        if self.prev_frame is None:
-            self.prev_frame = frame
         com = frame @ (self.com - robot_center)
-        desired_com = frame @ desired_offset
-        com_vel = (frame @ self.com - self.prev_frame @ self.prev_com) / dt
-        self.prev_com = self.com.copy()
-        desired_accel = 10 * (desired_com - com) - 4 * com_vel
-        desired_accel = np.clip(desired_accel, -5, 5)
+        if self.prev_com is not None:
+            com_vel = (com - self.prev_com) / dt
+        else:
+            com_vel = np.array([0, 0, 0])
+        print(true_com_vel, com_vel)
+        self.prev_com = com.copy()
+        desired_accel = 10 * (desired_offset - com) - 4 * true_com_vel
         q = self.data.xquat[self.left_foot_id]
 
-        #scipy needs quaternion in the form [x, y, z, w]
+        # scipy needs quaternion in the form [x, y, z, w]
         rotvec = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_rotvec()
-        #omega = self.data.cvel[self.left_foot_id][:3]
-        desired_angular_accel = 100 * rotvec - 10 * omega
+        omega = self.data.cvel[self.left_foot_id][:3]
+        desired_angular_accel = 100 * rotvec - 0*10 * omega
         i = self.compute_inertia_matrix(frame)
         a = self.construct_coefficient_matrix(frame, i, True) + self.construct_coefficient_matrix(frame, i, False)
         b = np.hstack((desired_accel, desired_angular_accel)).reshape((6, 1)) - self.g
@@ -154,8 +153,7 @@ class Stabilizer:
         fl = np.concatenate((frame.T @ f[:3, 0], frame.T @ f[3:6, 0]))
         fr = np.concatenate((frame.T @ f[6:9, 0], frame.T @ f[9:, 0]))
         torques = -(jl.T @ fl+ jr.T @ fr)
-        self.prev_frame = frame
-        values = [np.linalg.norm(com), np.linalg.norm(desired_com - com), np.linalg.norm(com_vel), np.linalg.norm(desired_accel),
+        values = [np.linalg.norm(com), np.linalg.norm(desired_offset - com), np.linalg.norm(com_vel), np.linalg.norm(desired_accel),
                   np.linalg.norm(rotvec), np.linalg.norm(desired_angular_accel)]
         return torques[6:], values
 

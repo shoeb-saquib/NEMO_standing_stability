@@ -109,6 +109,6 @@ class OmniscientStabilizer:
         torques = -(jl.T @ f[:6, 0] + jr.T @ f[6:, 0])
         values = [np.linalg.norm(self.com), np.linalg.norm(desired_com - self.com), np.linalg.norm(com_vel), np.linalg.norm(desired_accel),
                   np.linalg.norm(rotvec), np.linalg.norm(desired_angular_accel)]
-        return torques[6:], values
+        return torques[6:], com_vel, values
 
 
