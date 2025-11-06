@@ -8,10 +8,10 @@ from omniscient_stabilizer import OmniscientStabilizer
 from plotnine import *
 import pandas as pd
 
-parameters = ["COM Difference", "COM Offset Difference", "COM Vel Difference", "Desired Linear Acceleration Difference", "Rotation Vector Difference", "Desired Angular Acceleration Difference"]
+parameters = ["VelX", "VelY", "VelZ"]
 
 def display_plot(df, x, y):
-    plot = (ggplot(df, aes(x=x, y=y)) + geom_line())
+    plot = (ggplot(df, aes(x=x, y=y, color="Category")) + geom_line())
     plot.show()
 
 def simulate():
@@ -30,23 +30,33 @@ def simulate():
     com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
     desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
     differences = []
+    vels = []
     x = []
+    print(dt)
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
         data.ctrl[:], com_vel, true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
-        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel)
-        # differences.append(list(np.array(measured_values) - np.array(true_values)))
-        # x.append(t)
+        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel, data.qvel)
+        true_values = true_values.tolist()
+        measured_values = measured_values.tolist()
+        true_values.append("True")
+        measured_values.append("Measured")
+        vels.append(true_values)
+        vels.append(measured_values)
+        #differences.append(list(np.array(measured_values) - np.array(true_values)))
+        x.append(t)
+        x.append(t)
         mj.mj_step(model, data)
-        # data.site_xpos[com_marker] = true
-        # data.site_xpos[desired_com_marker] = measured
+        # data.site_xpos[com_marker] = true_values
+        # data.site_xpos[desired_com_marker] = measured_values
         t += dt
         time.sleep(dt)
         viewer2.sync()
-    # dataframe = pd.DataFrame(differences, columns=parameters)
-    # dataframe['Time'] = x
-    # for parameter in parameters:
-    #     display_plot(dataframe, 'Time', parameter)
+    columns = parameters + ["Category"]
+    dataframe = pd.DataFrame(vels, columns=columns)
+    dataframe['Time'] = x
+    for parameter in parameters:
+        display_plot(dataframe, 'Time', parameter)
 
 
 if __name__ == "__main__":

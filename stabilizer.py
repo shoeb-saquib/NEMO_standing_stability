@@ -122,21 +122,26 @@ class Stabilizer:
             return right_frame
         else:
             return left_frame
+        return left_frame
 
-    def calculate_joint_torques(self, dt, positions, desired_offset, true_com_vel):
+    def calculate_joint_torques(self, dt, positions, desired_offset, true_com_vel, qvel):
         self.data.qpos[:7] = [0] * 7
         self.data.qpos[7:] = positions
         mj.mj_step(self.model, self.data)
+        jl = self.get_jacobian(self.left_site)
+        jr = self.get_jacobian(self.right_site)
         robot_center = self.calculate_robot_center()
-        frame = self.estimate_floor_frame_from_feet(robot_center)
+        frame,_ = self.make_floor_frame_from_foot()
         com = frame @ (self.com - robot_center)
         if self.prev_com is not None:
-            com_vel = (com - self.prev_com) / dt
+            com_vel = (com - self.prev_com)/ dt
         else:
             com_vel = np.array([0, 0, 0])
-        print(true_com_vel, com_vel)
-        self.prev_com = com.copy()
-        desired_accel = 10 * (desired_offset - com) - 4 * true_com_vel
+        self.prev_com = com
+        # qvel_copy = qvel.copy()
+        # qvel_copy[:6] = 0
+        # com_vel = -(jl @ qvel_copy)[:3]
+        desired_accel = 10 * (desired_offset - com) - 4 * com_vel
         q = self.data.xquat[self.left_foot_id]
 
         # scipy needs quaternion in the form [x, y, z, w]
@@ -148,13 +153,10 @@ class Stabilizer:
         b = np.hstack((desired_accel, desired_angular_accel)).reshape((6, 1)) - self.g
         f = np.linalg.pinv(a) @ b
 
-        jl = self.get_jacobian(self.left_site)
-        jr = self.get_jacobian(self.right_site)
         fl = np.concatenate((frame.T @ f[:3, 0], frame.T @ f[3:6, 0]))
         fr = np.concatenate((frame.T @ f[6:9, 0], frame.T @ f[9:, 0]))
         torques = -(jl.T @ fl+ jr.T @ fr)
-        values = [np.linalg.norm(com), np.linalg.norm(desired_offset - com), np.linalg.norm(com_vel), np.linalg.norm(desired_accel),
-                  np.linalg.norm(rotvec), np.linalg.norm(desired_angular_accel)]
+        values = com_vel
         return torques[6:], values
 
 
