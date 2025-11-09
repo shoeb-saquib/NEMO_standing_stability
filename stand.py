@@ -32,17 +32,16 @@ def simulate():
     differences = []
     vels = []
     x = []
-    print(dt)
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
         data.ctrl[:], com_vel, true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
-        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel, data.qvel)
-        true_values = true_values.tolist()
-        measured_values = measured_values.tolist()
-        true_values.append("True")
-        measured_values.append("Measured")
-        vels.append(true_values)
-        vels.append(measured_values)
+        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel)
+        # true_values = true_values.tolist()
+        # measured_values = measured_values.tolist()
+        # true_values.append("True")
+        # measured_values.append("Measured")
+        # vels.append(true_values)
+        # vels.append(measured_values)
         #differences.append(list(np.array(measured_values) - np.array(true_values)))
         x.append(t)
         x.append(t)
@@ -52,16 +51,16 @@ def simulate():
         t += dt
         time.sleep(dt)
         viewer2.sync()
-    columns = parameters + ["Category"]
-    dataframe = pd.DataFrame(vels, columns=columns)
-    dataframe['Time'] = x
-    for parameter in parameters:
-        display_plot(dataframe, 'Time', parameter)
+    # columns = parameters + ["Category"]
+    # dataframe = pd.DataFrame(vels, columns=columns)
+    # dataframe['Time'] = x
+    # for parameter in parameters:
+    #     display_plot(dataframe, 'Time', parameter)
 
 
 if __name__ == "__main__":
     add_noise = False
-    noise_std = 0.15
+    noise_std = 0.1
     noise_frequency = 2
 
     home_com = [-4.36481990e-02, -5.25951358e-06, 3.99707890e-01]

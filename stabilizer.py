@@ -42,6 +42,18 @@ def skew(v):
         [-y, x,  0]
     ])
 
+def R_x(phi):
+    c, s = np.cos(phi), np.sin(phi)
+    return np.array([[1, 0, 0],
+                     [0, c, -s],
+                     [0, s, c]])
+
+def R_y(theta):
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, 0, s],
+                     [0, 1, 0],
+                     [-s, 0, c]])
+
 class Stabilizer:
 
     def __init__(self, model, data):
@@ -122,9 +134,8 @@ class Stabilizer:
             return right_frame
         else:
             return left_frame
-        return left_frame
 
-    def calculate_joint_torques(self, dt, positions, desired_offset, true_com_vel, qvel):
+    def calculate_joint_torques(self, dt, positions, desired_offset, true_com_vel):
         self.data.qpos[:7] = [0] * 7
         self.data.qpos[7:] = positions
         mj.mj_step(self.model, self.data)
@@ -133,15 +144,23 @@ class Stabilizer:
         robot_center = self.calculate_robot_center()
         frame,_ = self.make_floor_frame_from_foot()
         com = frame @ (self.com - robot_center)
-        if self.prev_com is not None:
-            com_vel = (com - self.prev_com)/ dt
-        else:
-            com_vel = np.array([0, 0, 0])
-        self.prev_com = com
+        # if self.prev_com is not None:
+        #     com_vel = (com - self.prev_com)/ dt
+        # else:
+        #     com_vel = np.zeros(3)
+        # self.prev_com = com
+        # alpha = 0.9
+        # com_vel = alpha * self.prev_com_vel + (1 - alpha) * com_vel
+        # self.prev_com_vel = com_vel
         # qvel_copy = qvel.copy()
         # qvel_copy[:6] = 0
         # com_vel = -(jl @ qvel_copy)[:3]
-        desired_accel = 10 * (desired_offset - com) - 4 * com_vel
+        curr = R_y(positions[4]) @ R_x(positions[5]) @ np.array([0.0, 0.0, com[2]])
+        com_vel = np.zeros(3)
+        if self.prev_com is not None: com_vel = (curr - self.prev_com) / dt
+        self.prev_com = curr
+        desired_accel = 10 * (desired_offset - com) - 0*4 * com_vel
+        #desired_accel = np.clip(desired_accel, -1, 1)
         q = self.data.xquat[self.left_foot_id]
 
         # scipy needs quaternion in the form [x, y, z, w]
