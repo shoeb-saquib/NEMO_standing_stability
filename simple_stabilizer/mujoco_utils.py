@@ -37,6 +37,5 @@ class MujocoUtils:
     @staticmethod
     def add_random_vels(t, dt, data, noise_std, interval):
         cycles = interval // dt
-        if int(t // dt) % cycles == 0:
-            #print(f"{t:.3f} : ADDED NOISE")
+        if int(t // dt) % cycles == 0 and t != 0:
             data.qvel += np.random.normal(0, noise_std, size=data.qvel.shape)

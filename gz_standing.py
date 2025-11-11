@@ -3,7 +3,6 @@ from rclpy.node import Node
 import numpy as np
 import os
 import sys
-import time
 from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import QoSProfile
 from builtin_interfaces.msg import Duration, Time
@@ -16,7 +15,7 @@ from geometry_msgs.msg import Twist
 helper_path = os.path.join(get_package_share_directory('prairie_control'), "helpers")
 sys.path.append(helper_path)
 import utils
-from simple_stabilizer import Stabilizer
+from simple_stabilizer.simple_stabilizer import Stabilizer
 
 JOINT_LIST_COMPLETE = ["l_hip_pitch_joint", "l_hip_roll_joint", "l_hip_yaw_joint", "l_knee_joint", "l_foot_pitch_joint",
                        "l_foot_roll_joint",

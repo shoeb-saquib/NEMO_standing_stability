@@ -2,11 +2,10 @@ import mujoco as mj
 from mujoco import viewer
 import numpy as np
 import time
-from mujoco_utils import MujocoUtils
-from stabilizer import Stabilizer
-from omniscient_stabilizer import OmniscientStabilizer
+from simple_stabilizer.mujoco_utils import MujocoUtils
+from stabilizer.stabilizer import Stabilizer
+from stabilizer.omniscient_stabilizer import OmniscientStabilizer
 from plotnine import *
-import pandas as pd
 
 parameters = ["VelX", "VelY", "VelZ"]
 
@@ -25,29 +24,26 @@ def simulate():
     t = 0
     data.qpos = 0.0
     data.qpos[2] = 0.68
-    # data.qpos = model.keyframe('home').qpos
     mj.mj_step(model, data)
     com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
     desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
-    differences = []
     vels = []
     x = []
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
-        data.ctrl[:], com_vel, true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
-        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(dt, data.qpos[7:], desired_offset, com_vel)
+        data.ctrl[:], true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
+        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(data.qpos[7:], data.qvel[6:], desired_offset, data.sensordata)
         # true_values = true_values.tolist()
         # measured_values = measured_values.tolist()
         # true_values.append("True")
         # measured_values.append("Measured")
         # vels.append(true_values)
         # vels.append(measured_values)
-        #differences.append(list(np.array(measured_values) - np.array(true_values)))
-        x.append(t)
-        x.append(t)
+        # x.append(t)
+        # x.append(t)
         mj.mj_step(model, data)
-        # data.site_xpos[com_marker] = true_values
-        # data.site_xpos[desired_com_marker] = measured_values
+        data.site_xpos[com_marker] = true_values
+        data.site_xpos[desired_com_marker] = measured_values
         t += dt
         time.sleep(dt)
         viewer2.sync()
@@ -59,7 +55,7 @@ def simulate():
 
 
 if __name__ == "__main__":
-    add_noise = False
+    add_noise = True
     noise_std = 0.1
     noise_frequency = 2
 
