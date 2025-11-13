@@ -4,12 +4,19 @@ import numpy as np
 import time
 from simple_stabilizer.mujoco_utils import MujocoUtils
 from stabilizer.stabilizer import Stabilizer
-from plotnine import *
+
+BASE_COM = [-0.04, 0, 0.4]
+X_COM_OFFSET = 0.0
+Y_COM_OFFSET = 0.05
+Z_COM_OFFSET = 0.0
+
+DESIRED_COM = np.array([BASE_COM[0] + X_COM_OFFSET, BASE_COM[1] + Y_COM_OFFSET, BASE_COM[2] + Z_COM_OFFSET])
+
+STAND_TIME = 3
 
 
-def display_plot(df, x, y):
-    plot = (ggplot(df, aes(x=x, y=y, color="Category")) + geom_line())
-    plot.show()
+def lin_interp(t, t_total, start, end):
+    return start + (t / t_total) * (end - start)
 
 def simulate():
     model = mj.MjModel.from_xml_path("models/nemo/flat_scene.xml")
@@ -17,13 +24,25 @@ def simulate():
     viewer2 = viewer.launch_passive(model, data)
     stabilizer = Stabilizer()
     dt = model.opt.timestep
-    t = 0
-    data.qpos = 0.0
-    data.qpos[2] = 0.68
+    t = -2
+    # data.qpos = 0.0
+    # data.qpos[2] = 0.68
+    data.qpos = model.keyframe("sit").qpos
     mj.mj_step(model, data)
+    start_com = None
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
-        data.ctrl[:] = stabilizer.calculate_joint_torques(dt, data.qpos[7:], data.qvel[6:], desired_offset, data.sensordata)
+        stabilizer.update_simulation(data.qpos[7:], data.qvel[6:])
+        if t < 0:
+            data.qpos = model.keyframe("sit").qpos
+            data.qvel = np.zeros_like(data.qvel)
+        else:
+            if start_com is None:
+                start_com = stabilizer.get_relative_com()
+            if t < STAND_TIME:
+                target_com = lin_interp(t, STAND_TIME, start_com, DESIRED_COM)
+            else: target_com = DESIRED_COM
+            data.ctrl[:] = stabilizer.calculate_joint_torques(target_com)
         mj.mj_step(model, data)
         t += dt
         time.sleep(dt)
@@ -31,13 +50,8 @@ def simulate():
 
 
 if __name__ == "__main__":
-    add_noise = True
+    add_noise = False
     noise_std = 0.1
     noise_frequency = 2
 
-    home_com = [-4.36481990e-02, -5.25951358e-06, 3.99707890e-01]
-    x_offset = 0
-    y_offset = 0
-    z_offset = -0.25
-    desired_offset = np.array([home_com[0] + x_offset, home_com[1] + y_offset, home_com[2] + z_offset])
     simulate()
