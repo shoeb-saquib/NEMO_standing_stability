@@ -4,10 +4,8 @@ import numpy as np
 import time
 from simple_stabilizer.mujoco_utils import MujocoUtils
 from stabilizer.stabilizer import Stabilizer
-from stabilizer.omniscient_stabilizer import OmniscientStabilizer
 from plotnine import *
 
-parameters = ["VelX", "VelY", "VelZ"]
 
 def display_plot(df, x, y):
     plot = (ggplot(df, aes(x=x, y=y, color="Category")) + geom_line())
@@ -16,42 +14,20 @@ def display_plot(df, x, y):
 def simulate():
     model = mj.MjModel.from_xml_path("models/nemo/flat_scene.xml")
     data = mj.MjData(model)
-    data_real = mj.MjData(model)
     viewer2 = viewer.launch_passive(model, data)
-    stabilizer = Stabilizer(model, data_real)
-    true_stabilizer = OmniscientStabilizer(model, data)
+    stabilizer = Stabilizer()
     dt = model.opt.timestep
     t = 0
     data.qpos = 0.0
     data.qpos[2] = 0.68
     mj.mj_step(model, data)
-    com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "com_marker")
-    desired_com_marker = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "desired_com_marker")
-    vels = []
-    x = []
     while True:
         if add_noise: MujocoUtils.add_random_vels(t, dt, data, noise_std, noise_frequency)
-        data.ctrl[:], true_values = true_stabilizer.calculate_joint_torques(dt, desired_offset)
-        data.ctrl[:], measured_values = stabilizer.calculate_joint_torques(data.qpos[7:], data.qvel[6:], desired_offset, data.sensordata)
-        # true_values = true_values.tolist()
-        # measured_values = measured_values.tolist()
-        # true_values.append("True")
-        # measured_values.append("Measured")
-        # vels.append(true_values)
-        # vels.append(measured_values)
-        # x.append(t)
-        # x.append(t)
+        data.ctrl[:] = stabilizer.calculate_joint_torques(dt, data.qpos[7:], data.qvel[6:], desired_offset, data.sensordata)
         mj.mj_step(model, data)
-        data.site_xpos[com_marker] = true_values
-        data.site_xpos[desired_com_marker] = measured_values
         t += dt
         time.sleep(dt)
         viewer2.sync()
-    # columns = parameters + ["Category"]
-    # dataframe = pd.DataFrame(vels, columns=columns)
-    # dataframe['Time'] = x
-    # for parameter in parameters:
-    #     display_plot(dataframe, 'Time', parameter)
 
 
 if __name__ == "__main__":

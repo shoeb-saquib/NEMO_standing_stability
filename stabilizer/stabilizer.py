@@ -1,86 +1,46 @@
 import mujoco as mj
-import numpy as np
 from scipy.spatial.transform import Rotation
+from stabilizer.math_utils import *
 
-def get_max_floor_clip(floor_frame, foot_corners, contact_center, threshold):
-    """
-
-    :param floor_frame:
-    :param foot_corners:
-    :param contact_center:
-    :param threshold:
-    :return:
-    """
-    error = None
-    for corner in foot_corners:
-        transformed_corner = floor_frame @ (corner - contact_center)
-        if transformed_corner[2] < threshold:
-            if not error:
-                error = transformed_corner[2]
-            else:
-                if transformed_corner[2] < error:
-                    error = transformed_corner[2]
-    return error
+GRAVITY = np.array([0, 0, -9.81])
 
 def estimate_base_velocity(foot_jac, joint_vel):
     """
-    Calculate linear velocity of base with the assumption that the foot is stationary.
+    Estimate the linear velocity of the robot base, assuming the foot is stationary.
 
-    :param foot_jac:
-    :param joint_vel:
-    :return:
+    :param foot_jac: (6, N) Jacobian of the foot in world frame.
+    :param joint_vel: (N-6,) Vector of joint velocities.
+    :return: (3,) Estimated base linear velocity.
     """
 
     jac_base = foot_jac[:, :6]
     jac_joints = foot_jac[:, 6:]
+
+    # Velocity of foot induced by joint motion
     foot_vel_from_joints = jac_joints @ joint_vel
+
+    # Solve for base velocity assuming foot velocity = 0
     base_vel = -np.linalg.solve(jac_base, foot_vel_from_joints)
     return base_vel[0:3]
 
-def exponential_filter(previous, current, alpha):
-    return alpha * previous + (1 - alpha) * current
-
-def quat_conjugate(q):
-    return np.array([q[0], -q[1], -q[2], -q[3]])
-
-def quat_mul(q1, q2):
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array([
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    ])
-
-def quat_from_mat(r):
-    qw = np.sqrt(1.0 + np.trace(r)) / 2.0
-    qx = (r[2, 1] - r[1, 2]) / (4.0 * qw)
-    qy = (r[0, 2] - r[2, 0]) / (4.0 * qw)
-    qz = (r[1, 0] - r[0, 1]) / (4.0 * qw)
-    return np.array([qw, qx, qy, qz])
-
-def skew(v):
-    x, y, z = v
-    return np.array([
-        [0, -z,  y],
-        [z,  0, -x],
-        [-y, x,  0]
-    ])
-
 class Stabilizer:
+    """
+    Calculates joint torques to keep robot standing as long as the left foot is on the floor.
+    """
 
-    def __init__(self, model, data):
-        self.model = model
-        self.data = data
-        self.m = np.sum(model.body_mass)
-        self.g = np.array([0, 0, -9.81])
+    def __init__(self):
+        self.model = mj.MjModel.from_xml_path("models/nemo/nemo5_torque.xml")
+        self.data = mj.MjData(self.model)
+
+        self.m = np.sum(self.model.body_mass)
         self.linear_force_to_accel = np.hstack((np.eye(3) / self.m, np.zeros((3, 3))))
-        self.com = data.subtree_com[0]
+
+        self.com = self.data.subtree_com[0]
         self.prev_vel = np.zeros(3)
-        self.left_foot_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, "l_foot_roll")
-        self.left_site = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "left_foot")
-        self.right_site = mj.mj_name2id(model, mj.mjtObj.mjOBJ_SITE, "right_foot")
+
+        self.left_foot_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_foot_roll")
+        self.left_site = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SITE, "left_foot")
+        self.right_site = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SITE, "right_foot")
 
     def get_jacobian(self, site):
         nv = self.model.nv
@@ -98,8 +58,15 @@ class Stabilizer:
         ids = [mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_GEOM, f"{foot_prefix}_foot_{i}") for i in range(1, 5)]
         return np.stack([self.data.geom_xpos[i] for i in ids])
 
-    def make_floor_frame_from_foot(self, foot_prefix="left"):
-        corners = self.get_foot_corners(foot_prefix=foot_prefix)
+    def construct_frame_from_foot(self, foot="left"):
+        """
+        Construct foot frame that rotates world coordinates to those in the foot frame.
+
+        :param foot: "left" or "right"
+        :return: (3, 3) World to floor rotation matrix.
+        """
+
+        corners = self.get_foot_corners(foot)
         foot_normal = np.cross(corners[1] - corners[0], corners[2] - corners[0])
         z_hat = -foot_normal
         z_hat /= np.linalg.norm(z_hat)
@@ -108,24 +75,19 @@ class Stabilizer:
         y_hat = np.cross(z_hat, x_hat)
         y_hat /= np.linalg.norm(y_hat)
         frame = np.vstack([x_hat, y_hat, z_hat])
-        return frame, corners
-
-    def estimate_floor_frame_from_feet(self, contact_center):
-        left_frame, left_corners = self.make_floor_frame_from_foot("left")
-        right_frame, right_corners = self.make_floor_frame_from_foot("right")
-        threshold = -0.08
-        left_error = get_max_floor_clip(left_frame, right_corners, contact_center, threshold)
-        if not left_error:
-            return left_frame
-        right_error = get_max_floor_clip(right_frame, left_corners, contact_center, threshold)
-        if not right_error or left_error < right_error:
-            return right_frame
-        else:
-            return left_frame
+        return frame
 
     def update_simulation(self, joint_pos, joint_vel):
-        # Set world frame to base orientation and base velocity to zero
+        """
+        Update MuJoCo simulation with given joint states and partially rebase to left foot frame.
+
+        :param joint_pos: (nq-7,) Array of joint positions.
+        :param joint_vel: (nv-6,) Array of joint velocities.
+        """
+
+        # Set world frame to base orientation
         self.data.qpos[:7] = [0., 0., 0., 1., 0., 0., 0.]
+        # Set base velocity to 0
         self.data.qvel[:6] = np.zeros(6)
 
         # Update joint state
@@ -134,16 +96,19 @@ class Stabilizer:
         mj.mj_forward(self.model, self.data)
 
         # Rebase world frame to left foot
-        foot_position = self.data.body("l_foot_roll").xpos
         foot_to_world = self.data.body("l_foot_roll").xmat.reshape(3,3)
-        world_to_foot = foot_to_world.T
-        base_position = -world_to_foot @ foot_position
         base_quat = quat_from_mat(foot_to_world)
-        self.data.qpos[0:3] = base_position
         self.data.qpos[3:7] = base_quat
         mj.mj_forward(self.model, self.data)
 
-    def compute_inertia_matrix(self, floor_frame):
+    def estimate_inertia_matrix(self, floor_frame):
+        """
+        Approximate the robot's inertia about the COM using a spherical model.
+
+        :param floor_frame: (3, 3) Rotation matrix of floor frame.
+        :return: (3, 3) Inertia matrix in floor coordinates.
+        """
+
         sum_m_d2 = 0.0
         for i in range(self.model.nbody):
             mi = self.model.body_mass[i]
@@ -157,6 +122,15 @@ class Stabilizer:
         return inertia_floor
 
     def construct_force_to_accel_matrix(self, floor_frame, inertia_matrix, left=True):
+        """
+        Build matrix that maps foot contact forces to COM linear and angular accelerations.
+
+        :param floor_frame: (3, 3) World to floor rotation matrix.
+        :param inertia_matrix: (3, 3) Inertia matrix in floor coordinates.
+        :param left: Boolean, True for left foot, False for right.
+        :return: (6, 12) Force-to-acceleration mapping matrix.
+        """
+
         if left: foot_site = self.left_site
         else: foot_site = self.right_site
         com_relative_to_foot = floor_frame @ (self.com - self.data.site_xpos[foot_site])
@@ -168,44 +142,66 @@ class Stabilizer:
         return a
 
     def compute_desired_contact_forces(self, floor_frame, desired_linear_accel, desired_angular_accel):
-        inertia_matrix = self.compute_inertia_matrix(floor_frame)
+        """
+        Compute foot contact forces necessary for desired accelerations.
+
+        :param floor_frame: (3, 3) World to floor rotation matrix.
+        :param desired_linear_accel: (3,) Desired COM linear acceleration.
+        :param desired_angular_accel: (3,) Desired angular acceleration.
+        :return: (12, 1) Desired contact forces for both feet.
+        """
+        inertia_matrix = self.estimate_inertia_matrix(floor_frame)
         left_force_to_accel = self.construct_force_to_accel_matrix(floor_frame, inertia_matrix, left=True)
         right_force_to_accel = self.construct_force_to_accel_matrix(floor_frame, inertia_matrix, left=False)
         force_to_accel = left_force_to_accel + right_force_to_accel
-        desired_accel = np.hstack((desired_linear_accel - self.g, desired_angular_accel)).reshape((6, 1))
+        desired_accel = np.hstack((desired_linear_accel - GRAVITY, desired_angular_accel)).reshape((6, 1))
         return np.linalg.pinv(force_to_accel) @ desired_accel
 
-    def calculate_joint_torques(self, joint_pos, joint_vel, relative_desired_com, sensor_data):
+    def calculate_joint_torques(self, dt, joint_pos, joint_vel, relative_desired_com, sensor_data):
+        """
+        Main control step — update internal simulation and compute joint torques that stabilize the robot.
+
+        :param dt: Simulation time step.
+        :param joint_pos: (nq-7,) Current joint positions.
+        :param joint_vel: (nv-6,) Current joint velocities.
+        :param relative_desired_com: (3,) Desired COM position relative to floor.
+        :param sensor_data: Sensor feedback.
+        :return: (nq-7,) Computed joint torques.
+        """
         self.update_simulation(joint_pos, joint_vel)
 
         jac_left = self.get_jacobian(self.left_site)
         jac_right = self.get_jacobian(self.right_site)
 
-        base_vel = estimate_base_velocity(jac_left, joint_vel)
-        com_vel = exponential_filter(self.prev_vel, base_vel, 0)
-
-        sensor_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SENSOR, "accelerometer")
-        start = self.model.sensor_adr[sensor_id]
-        accel = np.array(sensor_data[start:start + 3])
-
-        self.prev_vel = com_vel
-
-        contact_center = self.get_contact_center()
-        floor_frame = self.estimate_floor_frame_from_feet(contact_center)
-        relative_com = floor_frame @ (self.com - contact_center)
-        desired_linear_accel = 10 * (relative_desired_com - relative_com) - 0.3 * com_vel
-
+        # Estimate orientation error and desired angular acceleration
         q = self.data.xquat[self.left_foot_id]
-
-        # scipy needs quaternion in the form [x, y, z, w]
-        rotvec = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_rotvec()
-
+        foot_rotation = Rotation.from_quat([q[1], q[2], q[3], q[0]]) # scipy quaternion in the form [x, y, z, w]
+        rotvec = foot_rotation.as_rotvec()
         desired_angular_accel = 100 * rotvec
 
+        # Estimate COM velocity and smooth measurement
+        base_vel = estimate_base_velocity(jac_left, joint_vel)
+        com_vel = exponential_filter(self.prev_vel, base_vel, 0.9)
+
+        # Use accelerometer data to refine velocity estimate
+        sensor_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SENSOR, "accelerometer")
+        start = self.model.sensor_adr[sensor_id]
+        imu_accel = np.array(sensor_data[start:start + 3])
+        accel = foot_rotation.as_matrix().T @ imu_accel + GRAVITY
+        combined_accel = 0.5 * accel + 0.5 * (com_vel - self.prev_vel) / dt
+        com_vel = self.prev_vel + dt * combined_accel
+        self.prev_vel = com_vel
+
+        # Compute desired linear acceleration in floor frame
+        floor_frame = self.construct_frame_from_foot()
+        relative_com = floor_frame @ (self.com - self.get_contact_center())
+        desired_linear_accel = 10 * (relative_desired_com - relative_com) - com_vel
+
+        # Compute desired contact forces and map to joint torques
         contact_forces = self.compute_desired_contact_forces(floor_frame, desired_linear_accel, desired_angular_accel)
         left_force = np.concatenate((floor_frame.T @ contact_forces[:3, 0], floor_frame.T @ contact_forces[3:6, 0]))
         right_force = np.concatenate((floor_frame.T @ contact_forces[6:9, 0], floor_frame.T @ contact_forces[9:, 0]))
         joint_torques = -(jac_left.T @ left_force + jac_right.T @ right_force)
-        return joint_torques[6:], base_vel
+        return joint_torques[6:]
 
 

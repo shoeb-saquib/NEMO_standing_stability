@@ -1,6 +1,6 @@
 import mujoco as mj
-import numpy as np
 from scipy.spatial.transform import Rotation
+from stabilizer.math_utils import *
 
 def get_max_clip_in_floor(frame, corners, robot_center, threshold):
     error = None
@@ -14,26 +14,6 @@ def get_max_clip_in_floor(frame, corners, robot_center, threshold):
                     error = transformed_corner[2]
     return error
 
-def quat_conjugate(q):
-    return np.array([q[0], -q[1], -q[2], -q[3]])
-
-def quat_mul(q1, q2):
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    return np.array([
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    ])
-
-def skew(v):
-    x, y, z = v
-    return np.array([
-        [0, -z,  y],
-        [z,  0, -x],
-        [-y, x,  0]
-    ])
 
 class OmniscientStabilizer:
 
