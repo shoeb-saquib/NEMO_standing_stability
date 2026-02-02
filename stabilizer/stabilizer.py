@@ -1,9 +1,13 @@
 import mujoco as mj
 from scipy.spatial.transform import Rotation
+
+from contact_force_solver import ContactForceSolver
 from stabilizer.math_utils import *
+import time
 
 GRAVITY = np.array([0, 0, -9.81])
 TARGET_Z_ADJUSTMENT = -0.25
+MU = 0.6
 
 
 class Stabilizer:
@@ -24,6 +28,8 @@ class Stabilizer:
         self.left_foot_id = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_BODY, "l_foot_roll")
         self.left_site = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SITE, "left_foot")
         self.right_site = mj.mj_name2id(self.model, mj.mjtObj.mjOBJ_SITE, "right_foot")
+
+        self.solver = ContactForceSolver()
 
     def get_jacobian(self, site):
         """
@@ -136,12 +142,12 @@ class Stabilizer:
             foot_site = self.right_site
         x = floor_frame @ (self.com - self.data.site_xpos[foot_site])
         inertia_inv = np.linalg.inv(inertia_matrix)
-        a = np.vstack((self.linear_force_to_accel, np.hstack((inertia_inv @ skew(x), inertia_inv))))
+        force_to_accel = np.vstack((self.linear_force_to_accel, np.hstack((inertia_inv @ skew(x), inertia_inv))))
         if left:
-            a = np.hstack((a, np.zeros((6, 6))))
+            force_to_accel = np.hstack((force_to_accel, np.zeros((6, 6))))
         else:
-            a = np.hstack((np.zeros((6, 6)), a))
-        return a
+            force_to_accel = np.hstack((np.zeros((6, 6)), force_to_accel))
+        return force_to_accel
 
     def compute_desired_contact_forces(self, floor_frame, desired_linear_accel, desired_angular_accel):
         """
@@ -150,14 +156,14 @@ class Stabilizer:
         :param floor_frame: (3, 3) World to floor rotation matrix.
         :param desired_linear_accel: (3,) Desired COM linear acceleration.
         :param desired_angular_accel: (3,) Desired angular acceleration.
-        :return: (12, 1) Desired contact forces for both feet.
+        :return: (12,) Desired contact forces for both feet.
         """
         inertia_matrix = self.estimate_inertia_matrix(floor_frame)
         left_force_to_accel = self.construct_force_to_accel_matrix(floor_frame, inertia_matrix, left=True)
         right_force_to_accel = self.construct_force_to_accel_matrix(floor_frame, inertia_matrix, left=False)
         force_to_accel = left_force_to_accel + right_force_to_accel
-        desired_accel = np.hstack((desired_linear_accel - GRAVITY, desired_angular_accel)).reshape((6, 1))
-        return np.linalg.pinv(force_to_accel) @ desired_accel
+        desired_accel = np.hstack((desired_linear_accel - GRAVITY, desired_angular_accel))
+        return self.solver.solve(force_to_accel, desired_accel)
 
     def update_simulation(self, joint_pos, joint_vel):
         """
@@ -221,8 +227,8 @@ class Stabilizer:
 
         # Compute desired contact forces and map to joint torques
         contact_forces = self.compute_desired_contact_forces(floor_frame, desired_linear_accel, desired_angular_accel)
-        left_force = np.concatenate((floor_frame.T @ contact_forces[:3, 0], floor_frame.T @ contact_forces[3:6, 0]))
-        right_force = np.concatenate((floor_frame.T @ contact_forces[6:9, 0], floor_frame.T @ contact_forces[9:, 0]))
+        left_force = np.concatenate((floor_frame.T @ contact_forces[:3], floor_frame.T @ contact_forces[3:6]))
+        right_force = np.concatenate((floor_frame.T @ contact_forces[6:9], floor_frame.T @ contact_forces[9:]))
         joint_torques = -(jac_left.T @ left_force + jac_right.T @ right_force)
         return joint_torques[6:]
 
